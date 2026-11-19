@@ -1,0 +1,479 @@
+{
+  "info": {
+    "name": "UNIPUS Library API",
+    "description": "Koleksi lengkap REST API UNIPUS (User & Admin) dengan auto-save JWT token.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3400", "type": "string" },
+    { "key": "tokenUser", "value": "", "type": "string" },
+    { "key": "tokenAdmin", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Auth",
+      "item": [
+        {
+          "name": "Health Check DB",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Budi Mahasiswa\",\n  \"email\": \"budi@unipus.ac.id\",\n  \"password\": \"password123\",\n  \"nim\": \"2205101001\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "Register Admin (Lanjut UPDATE role di Neon)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Petugas Perpustakaan\",\n  \"email\": \"admin@unipus.ac.id\",\n  \"password\": \"admin12345\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/register"
+          }
+        },
+        {
+          "name": "Login User (Auto-save tokenUser)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token && res.user) {",
+                  "  if (res.user.role === 'admin') {",
+                  "    pm.collectionVariables.set('tokenAdmin', res.token);",
+                  "  } else {",
+                  "    pm.collectionVariables.set('tokenUser', res.token);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"budi@unipus.ac.id\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Login Admin (Auto-save tokenAdmin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token && res.user) {",
+                  "  if (res.user.role === 'admin') {",
+                  "    pm.collectionVariables.set('tokenAdmin', res.token);",
+                  "  } else {",
+                  "    pm.collectionVariables.set('tokenUser', res.token);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@unipus.ac.id\",\n  \"password\": \"admin12345\"\n}"
+            },
+            "url": "{{baseUrl}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Get Current Auth (/me)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{tokenUser}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/api/auth/me"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{tokenUser}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Public Catalog",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/categories"
+          }
+        },
+        {
+          "name": "List Books (Search, Filter, Sort, Pagination)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/books?page=1&limit=12&sort=created_at&order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "books"],
+              "query": [
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "category_id", "value": "1", "disabled": true },
+                { "key": "available_only", "value": "true", "disabled": true },
+                { "key": "sort", "value": "created_at" },
+                { "key": "order", "value": "desc" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "12" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Book Detail",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/books/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. User Profile & Dashboard",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{tokenUser}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "User Dashboard",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users/dashboard"
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users/me"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Budi Santoso\"\n}"
+            },
+            "url": "{{baseUrl}}/api/users/me"
+          }
+        },
+        {
+          "name": "Submit / Update NIM",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nim\": \"2205101001\"\n}"
+            },
+            "url": "{{baseUrl}}/api/users/me/nim"
+          }
+        },
+        {
+          "name": "Get Notifications",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users/notifications"
+          }
+        },
+        {
+          "name": "Mark All Notifications Read",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/users/notifications/read-all"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. User Loans",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{tokenUser}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Loan Request",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"book_ids\": [1],\n  \"notes\": \"Pinjam untuk referensi tugas akhir\"\n}"
+            },
+            "url": "{{baseUrl}}/api/loans"
+          }
+        },
+        {
+          "name": "Get My Loans",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/loans/my"
+          }
+        },
+        {
+          "name": "Get Loan Detail & Histories",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/loans/1"
+          }
+        },
+        {
+          "name": "Cancel Pending Loan",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/loans/1/cancel"
+          }
+        },
+        {
+          "name": "Request Book Return",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/loans/1/return-request"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Admin - Dashboard & Users",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{tokenAdmin}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Admin Dashboard",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/admin/dashboard"
+          }
+        },
+        {
+          "name": "Get Library Settings",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/admin/settings"
+          }
+        },
+        {
+          "name": "Update Library Settings",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loan_duration_days\": 7,\n  \"max_active_loans\": 3,\n  \"require_nim_approval\": \"true\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/settings"
+          }
+        },
+        {
+          "name": "List Users (Filter Pending NIM)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/admin/users?nim_status=pending"
+          }
+        },
+        {
+          "name": "Approve / Reject User NIM",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\",\n  \"note\": \"NIM terverifikasi aktif\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/users/1/nim-review"
+          }
+        },
+        {
+          "name": "Activate / Deactivate User",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/users/1/status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Admin - Categories & Books",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{tokenAdmin}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "Create Category",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Teknologi Informasi\",\n  \"description\": \"Buku pemrograman, jaringan, dan rekayasa perangkat lunak\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/categories"
+          }
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ilmu Komputer\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/categories/1"
+          }
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/admin/categories/1"
+          }
+        },
+        {
+          "name": "Create Book",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category_id\": 1,\n  \"title\": \"Clean Code\",\n  \"author\": \"Robert C. Martin\",\n  \"publisher\": \"Prentice Hall\",\n  \"publication_year\": 2008,\n  \"isbn\": \"9780132350884\",\n  \"synopsis\": \"Panduan praktis menulis kode yang bersih dan mudah dipelihara.\",\n  \"cover_book\": \"https://images-na.ssl-images-amazon.com/images/I/41xShlnTZTL.jpg\",\n  \"total_stock\": 5\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/books"
+          }
+        },
+        {
+          "name": "Update Book",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"total_stock\": 8\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/books/1"
+          }
+        },
+        {
+          "name": "Delete Book",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/api/admin/books/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Admin - Loans Management",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          { "key": "token", "value": "{{tokenAdmin}}", "type": "string" }
+        ]
+      },
+      "item": [
+        {
+          "name": "List All Loans",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/admin/loans"
+          }
+        },
+        {
+          "name": "Approve Loan (Kurangi Stok)",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"duration_days\": 7,\n  \"note\": \"Disetujui, silakan ambil buku\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/loans/1/approve"
+          }
+        },
+        {
+          "name": "Reject Loan",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Buku sedang dalam perbaikan\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/loans/1/reject"
+          }
+        },
+        {
+          "name": "Confirm Return (Kembalikan Stok)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{baseUrl}}/api/admin/loans/1/confirm-return"
+          }
+        }
+      ]
+    }
+  ]
+}
