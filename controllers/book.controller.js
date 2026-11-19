@@ -1,6 +1,7 @@
 const pool = require("../db/connect");
 const HttpError = require("../utils/httpError");
 const { withTransaction } = require("../utils/transaction");
+const { uploadToCloudinary } = require("../utils/cloudinary");
 
 exports.getBooks = async (req, res) => {
   const {
@@ -84,6 +85,13 @@ exports.getBookById = async (req, res) => {
 
 exports.createBook = async (req, res) => {
   const data = req.valid.body;
+
+  let coverUrl = data.cover_book ?? null;
+  if (req.file) {
+    const uploaded = await uploadToCloudinary(req.file.buffer);
+    coverUrl = uploaded.secure_url;
+  }
+
   const { rows } = await pool.query(
     `INSERT INTO books (category_id, title, author, publisher, publication_year, isbn, synopsis, cover_book, total_stock, available_stock)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
@@ -113,6 +121,12 @@ exports.createBook = async (req, res) => {
 exports.updateBook = async (req, res) => {
   const { id } = req.valid.params;
   const data = req.valid.body;
+
+  let uploadedCoverUrl = null;
+  if (req.file) {
+    const uploaded = await uploadToCloudinary(req.file.buffer);
+    uploadedCoverUrl = uploaded.secure_url;
+  }
 
   const book = await withTransaction(async (client) => {
     const { rows: existing } = await client.query(
@@ -172,7 +186,6 @@ exports.updateBook = async (req, res) => {
 exports.deleteBook = async (req, res) => {
   const { id } = req.valid.params;
 
-  // Business Rule #9: Buku dengan transaksi aktif tidak boleh dihapus
   const activeLoans = await pool.query(
     `SELECT 1 FROM loan_items li JOIN loans l ON li.loan_id = l.id
      WHERE li.book_id = $1 AND l.status IN ('pending', 'approved', 'borrowed', 'return_requested', 'overdue')
