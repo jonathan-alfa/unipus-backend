@@ -3,14 +3,14 @@ const pool = require("../db/connect");
 const HttpError = require("../utils/httpError");
 
 function getToken(req) {
-  const [type, token] = (req.headers.authorization || "").split("");
+  const [type, token] = (req.headers.authorization || "").split(" ");
   return type === "Bearer" ? token : null;
 }
 
 async function loadUser(token) {
   const payload = jwt.verify(token, process.env.JWT_SECRET);
   const { rows } = await pool.query(
-    `SELECT id, name, email, role, is_active, nim, nim_status, FROM users WHERE id = $1`,
+    `SELECT id, name, email, role, is_active, nim, nim_status FROM users WHERE id = $1`,
     [payload.id],
   );
 
