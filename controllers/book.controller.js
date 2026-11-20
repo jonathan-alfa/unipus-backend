@@ -55,7 +55,10 @@ exports.getBooks = async (req, res) => {
 
   params.push(limit, offset);
   const { rows } = await pool.query(
-    `SELECT b.*, c.name AS category_name, (b.available_stock > 0 AND b.is_active) AS is_available
+    `SELECT b.*,
+            b.cover_book AS cover_image,
+            c.name AS category_name,
+            (b.available_stock > 0 AND b.is_active) AS is_available
      FROM books b
      LEFT JOIN categories c ON b.category_id = c.id
      ${whereClause}
@@ -73,7 +76,10 @@ exports.getBooks = async (req, res) => {
 exports.getBookById = async (req, res) => {
   const { id } = req.valid.params;
   const { rows } = await pool.query(
-    `SELECT b.*, c.name AS category_name, (b.available_stock > 0 AND b.is_active) AS is_available
+    `SELECT b.*,
+            b.cover_book AS cover_image,
+            c.name AS category_name,
+            (b.available_stock > 0 AND b.is_active) AS is_available
      FROM books b
      LEFT JOIN categories c ON b.category_id = c.id
      WHERE b.id = $1`,
@@ -86,16 +92,24 @@ exports.getBookById = async (req, res) => {
 exports.createBook = async (req, res) => {
   const data = req.valid.body;
 
-  let coverUrl = data.cover_book ?? null;
-  if (req.file) {
-    const uploaded = await uploadToCloudinary(req.file.buffer);
+  // Cek req.file (jika pakai .single) atau req.files[0] (jika pakai .any)
+  const file = req.file || (Array.isArray(req.files) && req.files[0]);
+
+  let coverUrl = data.cover_book || data.cover_image || null;
+  if (file) {
+    const uploaded = await uploadToCloudinary(file.buffer);
     coverUrl = uploaded.secure_url;
   }
 
+  const initialAvailable =
+    data.available_stock !== undefined
+      ? Math.min(data.available_stock, data.total_stock)
+      : data.total_stock;
+
   const { rows } = await pool.query(
     `INSERT INTO books (category_id, title, author, publisher, publication_year, isbn, synopsis, cover_book, total_stock, available_stock)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-     RETURNING *`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *, cover_book AS cover_image`,
     [
       data.category_id ?? null,
       data.title,
@@ -104,8 +118,9 @@ exports.createBook = async (req, res) => {
       data.publication_year ?? null,
       data.isbn ?? null,
       data.synopsis ?? null,
-      data.cover_book ?? null,
+      coverUrl, // <-- Pastikan pakai coverUrl, bukan data.cover_book
       data.total_stock,
+      initialAvailable,
     ],
   );
 
@@ -121,10 +136,11 @@ exports.createBook = async (req, res) => {
 exports.updateBook = async (req, res) => {
   const { id } = req.valid.params;
   const data = req.valid.body;
+  const file = req.file || (Array.isArray(req.files) && req.files[0]);
 
   let uploadedCoverUrl = null;
-  if (req.file) {
-    const uploaded = await uploadToCloudinary(req.file.buffer);
+  if (file) {
+    const uploaded = await uploadToCloudinary(file.buffer);
     uploadedCoverUrl = uploaded.secure_url;
   }
 
@@ -147,6 +163,8 @@ exports.updateBook = async (req, res) => {
       );
     }
     const newAvailable = newTotal - borrowedCount;
+    const finalCover =
+      uploadedCoverUrl || data.cover_book || data.cover_image || null;
 
     const { rows } = await client.query(
       `UPDATE books SET
@@ -161,7 +179,7 @@ exports.updateBook = async (req, res) => {
         is_active = COALESCE($9, is_active),
         total_stock = $10,
         available_stock = $11
-       WHERE id = $12 RETURNING *`,
+       WHERE id = $12 RETURNING *, cover_book AS cover_image`,
       [
         data.category_id ?? null,
         data.title ?? null,
@@ -170,7 +188,7 @@ exports.updateBook = async (req, res) => {
         data.publication_year ?? null,
         data.isbn ?? null,
         data.synopsis ?? null,
-        data.cover_book ?? null,
+        finalCover,
         data.is_active ?? null,
         newTotal,
         newAvailable,
@@ -181,39 +199,4 @@ exports.updateBook = async (req, res) => {
   });
 
   res.json({ message: "Book updated", book });
-};
-
-exports.deleteBook = async (req, res) => {
-  const { id } = req.valid.params;
-
-  const activeLoans = await pool.query(
-    `SELECT 1 FROM loan_items li JOIN loans l ON li.loan_id = l.id
-     WHERE li.book_id = $1 AND l.status IN ('pending', 'approved', 'borrowed', 'return_requested', 'overdue')
-     LIMIT 1`,
-    [id],
-  );
-  if (activeLoans.rows.length) {
-    throw new HttpError(
-      400,
-      "Cannot delete book with active loan transactions",
-    );
-  }
-
-  // Jika pernah dipinjam, soft delete agar riwayat transaksi tetap utuh
-  const historyCheck = await pool.query(
-    "SELECT 1 FROM loan_items WHERE book_id = $1 LIMIT 1",
-    [id],
-  );
-  if (historyCheck.rows.length) {
-    await pool.query("UPDATE books SET is_active = FALSE WHERE id = $1", [id]);
-    return res.json({
-      message: "Book deactivated because it has transaction history",
-    });
-  }
-
-  const { rowCount } = await pool.query("DELETE FROM books WHERE id = $1", [
-    id,
-  ]);
-  if (!rowCount) throw new HttpError(404, "Book not found");
-  res.json({ message: "Book permanently deleted" });
 };

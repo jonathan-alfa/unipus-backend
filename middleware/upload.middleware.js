@@ -4,11 +4,18 @@ const HttpError = require("../utils/httpError");
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
-  if (allowedTypes.includes(file.mimetypes)) {
+  const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+
+  if (allowedMimes.includes(file.mimetype.toLowerCase())) {
     cb(null, true);
   } else {
-    cb(new HttpError(400, "Image format must be JPEG, PNG, or JPG"), false);
+    cb(
+      new HttpError(
+        400,
+        `Format gambar tidak didukung (${file.mimetype}). Gunakan JPEG, PNG, atau WEBP`,
+      ),
+      false,
+    );
   }
 };
 

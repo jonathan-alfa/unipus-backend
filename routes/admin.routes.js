@@ -22,20 +22,39 @@ const categoryBody = z.object({
   description: z.string().trim().optional().nullable(),
 });
 
+const emptyToUndef = (val) =>
+  val === "" || val === null || val === undefined ? undefined : val;
+
 const createBookBody = z.object({
-  category_id: optionalInt,
+  category_id: z.preprocess(
+    emptyToUndef,
+    z.coerce.number().int().positive().optional().nullable(),
+  ),
   title: z.string().trim().min(1).max(255),
   author: z.string().trim().max(255).optional().nullable(),
   publisher: z.string().trim().max(255).optional().nullable(),
   publication_year: z.preprocess(
-    (val) =>
-      val === "" || val === null || val === undefined ? undefined : val,
+    emptyToUndef,
     z.coerce.number().int().min(1000).max(2100).optional().nullable(),
   ),
-  isbn: z.string().trim().max(20).optional().nullable(),
+  isbn: z.preprocess(
+    emptyToUndef,
+    z.string().trim().max(20).optional().nullable(),
+  ),
   synopsis: z.string().trim().optional().nullable(),
-  cover_book: z.string().trim().max(500).optional().nullable(),
+  cover_book: z.preprocess(
+    emptyToUndef,
+    z.string().trim().max(500).optional().nullable(),
+  ),
+  cover_image: z.preprocess(
+    emptyToUndef,
+    z.string().trim().max(500).optional().nullable(),
+  ),
   total_stock: z.coerce.number().int().min(0),
+  available_stock: z.preprocess(
+    emptyToUndef,
+    z.coerce.number().int().min(0).optional(),
+  ),
 });
 
 const updateBookBody = createBookBody.partial().extend({
@@ -126,16 +145,18 @@ router.delete(
 // Manajemen Buku
 router.post(
   "/books",
-  uploadBookCover.single("cover_book"),
+  uploadBookCover.any(),
   validated({ body: createBookBody }),
   asyncHandler(bookCtrl.createBook),
 );
+
 router.put(
   "/books/:id",
-  uploadBookCover.single("cover_book"),
+  uploadBookCover.any(),
   validated({ params: idParam, body: updateBookBody }),
   asyncHandler(bookCtrl.updateBook),
 );
+
 router.delete(
   "/books/:id",
   validated({ params: idParam }),
