@@ -403,7 +403,7 @@ exports.updateBook = async (req, res) => {
 exports.deleteBook = async (req, res) => {
   const { id } = req.valid.params;
 
-  await withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const { rows: existing } = await client.query(
       "SELECT id, title FROM books WHERE id = $1 FOR UPDATE",
       [id],
@@ -413,8 +413,8 @@ exports.deleteBook = async (req, res) => {
     const activeLoanRes = await client.query(
       `SELECT 1 FROM loan_items li
        JOIN loans l ON li.loan_id = l.id
-       JOIN loan_statuses ls ON l.status_id = ls.id
-       WHERE li.book_id = $1 AND ls.code IN ('pending', 'approved', 'borrowed', 'return_requested')
+       WHERE li.book_id = $1
+         AND l.status IN ('pending', 'approved', 'borrowed', 'return_request', 'overdue')
        LIMIT 1`,
       [id],
     );
@@ -429,17 +429,32 @@ exports.deleteBook = async (req, res) => {
       `SELECT 1 FROM loan_items WHERE book_id = $1 LIMIT 1`,
       [id],
     );
+
+    let mode = "deleted";
     if (historyRes.rows.length) {
-      // Soft delete jika sudah punya riwayat peminjaman
       await client.query(`UPDATE books SET is_active = FALSE WHERE id = $1`, [
         id,
       ]);
+      mode = "deactivated";
     } else {
       await client.query(`DELETE FROM books WHERE id = $1`, [id]);
     }
+
+    await client.query(
+      `INSERT INTO activity_logs (user_id, action, entity_type, entity_id, metadata)
+       VALUES ($1, 'DELETE_BOOK', 'books', $2, $3)`,
+      [req.user.id, id, JSON.stringify({ title: existing[0].title, mode })],
+    );
+
+    return mode;
   });
 
-  res.json({ message: "Book deleted" });
+  res.json({
+    message:
+      result === "deactivated"
+        ? "Buku dinonaktifkan karena memiliki riwayat peminjaman"
+        : "Book deleted",
+  });
 };
 
 exports.getIncompleteBooks = async (req, res) => {
