@@ -8,22 +8,25 @@ const loanCtrl = require("../controllers/loan.controller");
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 const createLoanBody = z.object({
-  book_ids: z.array(z.number().int().positive()).min(1),
+  book_ids: z.array(z.coerce.number().int().positive()).min(1),
   notes: z.string().trim().max(500).optional().nullable(),
 });
 
 const myLoansQuery = z.object({
   status: z
-    .enum([
-      "pending",
-      "approved",
-      "borrowed",
-      "return_requested",
-      "returned",
-      "rejected",
-      "cancelled",
-      "overdue",
-    ])
+    .preprocess(
+      (val) => (val === "return_requested" ? "return_request" : val),
+      z.enum([
+        "pending",
+        "approved",
+        "borrowed",
+        "return_request",
+        "returned",
+        "rejected",
+        "cancelled",
+        "overdue",
+      ]),
+    )
     .optional(),
 });
 

@@ -10,8 +10,11 @@ const userCtrl = require("../controllers/user.controller");
 const dashCtrl = require("../controllers/dashboard.controller");
 const { uploadBookCover } = require("../middleware/upload.middleware");
 
+const emptyToUndef = (val) =>
+  val === "" || val === null || val === undefined ? undefined : val;
+
 const optionalInt = z.preprocess(
-  (val) => (val === "" || val === null || val === undefined ? undefined : val),
+  emptyToUndef,
   z.coerce.number().int().positive().optional().nullable(),
 );
 
@@ -22,14 +25,36 @@ const categoryBody = z.object({
   description: z.string().trim().optional().nullable(),
 });
 
-const emptyToUndef = (val) =>
-  val === "" || val === null || val === undefined ? undefined : val;
+const parseCopyCodes = z.preprocess(
+  (val) => {
+    if (!val) return [];
+    if (Array.isArray(val))
+      return val.map((v) => String(v).trim()).filter(Boolean);
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (!trimmed) return [];
+      if (trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return Array.isArray(parsed)
+            ? parsed.map((v) => String(v).trim()).filter(Boolean)
+            : [];
+        } catch {
+          return [];
+        }
+      }
+      return trimmed
+        .split(/[\n,]+/)
+        .map((v) => v.trim())
+        .filter(Boolean);
+    }
+    return [];
+  },
+  z.array(z.string().min(1).max(100)),
+);
 
 const createBookBody = z.object({
-  category_id: z.preprocess(
-    emptyToUndef,
-    z.coerce.number().int().positive().optional().nullable(),
-  ),
+  category_id: optionalInt,
   title: z.string().trim().min(1).max(255),
   author: z.string().trim().max(255).optional().nullable(),
   publisher: z.string().trim().max(255).optional().nullable(),
@@ -50,11 +75,15 @@ const createBookBody = z.object({
     emptyToUndef,
     z.string().trim().max(500).optional().nullable(),
   ),
-  total_stock: z.coerce.number().int().min(0),
+  total_stock: z.preprocess(
+    emptyToUndef,
+    z.coerce.number().int().min(1).optional(),
+  ),
   available_stock: z.preprocess(
     emptyToUndef,
     z.coerce.number().int().min(0).optional(),
   ),
+  copy_codes: parseCopyCodes.optional().default([]),
 });
 
 const updateBookBody = createBookBody.partial().extend({
@@ -62,10 +91,13 @@ const updateBookBody = createBookBody.partial().extend({
     (val) => (val === "true" ? true : val === "false" ? false : val),
     z.boolean().optional(),
   ),
+  add_copy_codes: parseCopyCodes.optional(),
+  remove_copy_codes: parseCopyCodes.optional(),
 });
 
 const approveLoanBody = z.object({
   duration_days: z.number().int().min(1).max(90).optional(),
+  copy_codes: z.array(z.string().trim().min(1)).optional(),
   due_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -143,6 +175,8 @@ router.delete(
 );
 
 // Manajemen Buku
+router.get("/books/incomplete", asyncHandler(bookCtrl.getIncompleteBooks));
+
 router.post(
   "/books",
   uploadBookCover.any(),
@@ -155,6 +189,29 @@ router.put(
   uploadBookCover.any(),
   validated({ params: idParam, body: updateBookBody }),
   asyncHandler(bookCtrl.updateBook),
+);
+
+router.patch(
+  "/books/:id/assign-codes",
+  validated({
+    params: idParam,
+    body: z.object({ copy_codes: parseCopyCodes }),
+  }),
+  asyncHandler(bookCtrl.assignCopyCodes),
+);
+
+router.patch(
+  "/book-copies/:id",
+  validated({
+    params: idParam,
+    body: z.object({
+      copy_code: z.string().trim().min(1).max(100),
+      status: z
+        .enum(["available", "borrowed", "maintenance", "lost"])
+        .optional(),
+    }),
+  }),
+  asyncHandler(bookCtrl.updateBookCopy),
 );
 
 router.delete(

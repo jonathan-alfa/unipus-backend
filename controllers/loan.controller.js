@@ -2,7 +2,6 @@ const pool = require("../db/connect");
 const HttpError = require("../utils/httpError");
 const { withTransaction } = require("../utils/transaction");
 
-// --- USER ---
 exports.createLoan = async (req, res) => {
   const { book_ids, notes } = req.valid.body;
   const uniqueBookIds = [...new Set(book_ids)];
@@ -26,8 +25,10 @@ exports.createLoan = async (req, res) => {
 
     const activeRes = await client.query(
       `SELECT l.status, COUNT(li.id)::int AS count
-       FROM loans l JOIN loan_items li ON l.id = li.loan_id
-       WHERE l.user_id = $1 AND l.status IN ('pending', 'approved', 'borrowed', 'return_requested', 'overdue')
+       FROM loans l
+       JOIN loan_items li ON l.id = li.loan_id
+       WHERE l.user_id = $1
+         AND l.status IN ('pending', 'approved', 'borrowed', 'return_request', 'overdue')
        GROUP BY l.status`,
       [req.user.id],
     );
@@ -107,12 +108,18 @@ exports.getMyLoans = async (req, res) => {
   const { rows } = await pool.query(
     `SELECT l.*, ls.label AS status_label,
             json_agg(json_build_object(
-              'id', b.id, 'title', b.title, 'author', b.author, 'cover_book', b.cover_book
+              'id', b.id,
+              'title', b.title,
+              'author', b.author,
+              'cover_book', b.cover_book,
+              'cover_image', b.cover_book,
+              'copy_code', bc.copy_code
             )) AS books
      FROM loans l
      JOIN loan_statuses ls ON l.status = ls.code
      JOIN loan_items li ON l.id = li.loan_id
      JOIN books b ON li.book_id = b.id
+     LEFT JOIN book_copies bc ON li.book_copy_id = bc.id
      WHERE l.user_id = $1 ${filter}
      GROUP BY l.id, ls.label
      ORDER BY l.created_at DESC`,
@@ -127,13 +134,20 @@ exports.getLoanDetail = async (req, res) => {
   const { rows } = await pool.query(
     `SELECT l.*, ls.label AS status_label, u.name AS user_name, u.email AS user_email, u.nim AS user_nim,
             json_agg(json_build_object(
-              'id', b.id, 'title', b.title, 'author', b.author, 'isbn', b.isbn, 'cover_book', b.cover_book
+              'id', b.id,
+              'title', b.title,
+              'author', b.author,
+              'isbn', b.isbn,
+              'cover_book', b.cover_book,
+              'cover_image', b.cover_book,
+              'copy_code', bc.copy_code
             )) AS books
      FROM loans l
      JOIN loan_statuses ls ON l.status = ls.code
      JOIN users u ON l.user_id = u.id
      JOIN loan_items li ON l.id = li.loan_id
      JOIN books b ON li.book_id = b.id
+     LEFT JOIN book_copies bc ON li.book_copy_id = bc.id
      WHERE l.id = $1
      GROUP BY l.id, ls.label, u.name, u.email, u.nim`,
     [id],
@@ -198,12 +212,12 @@ exports.requestReturn = async (req, res) => {
     }
 
     await client.query(
-      `UPDATE loans SET status = 'return_requested' WHERE id = $1`,
+      `UPDATE loans SET status = 'return_request' WHERE id = $1`,
       [id],
     );
     await client.query(
       `INSERT INTO loan_status_histories (loan_id, from_status, to_status, changed_by, note)
-       VALUES ($1, $2, 'return_requested', $3, 'Return requested by user')`,
+       VALUES ($1, $2, 'return_request', $3, 'Return requested by user')`,
       [id, rows[0].status, req.user.id],
     );
   });
@@ -211,7 +225,6 @@ exports.requestReturn = async (req, res) => {
   res.json({ message: "Return request submitted" });
 };
 
-// --- ADMIN ---
 exports.getAllLoansAdmin = async (req, res) => {
   await pool.query(
     `UPDATE loans SET status = 'overdue' WHERE status = 'borrowed' AND due_date < CURRENT_DATE`,
@@ -228,7 +241,9 @@ exports.getAllLoansAdmin = async (req, res) => {
   if (search) {
     params.push(`%${search.toLowerCase()}%`);
     conditions.push(
-      `(LOWER(u.name) LIKE $${params.length} OR LOWER(u.nim) LIKE $${params.length})`,
+      `(LOWER(u.name) LIKE $${params.length}
+        OR LOWER(u.nim) LIKE $${params.length}
+        OR LOWER(bc.copy_code) LIKE $${params.length})`,
     );
   }
 
@@ -237,12 +252,20 @@ exports.getAllLoansAdmin = async (req, res) => {
     : "";
   const { rows } = await pool.query(
     `SELECT l.*, ls.label AS status_label, u.name AS user_name, u.email AS user_email, u.nim AS user_nim,
-            json_agg(json_build_object('id', b.id, 'title', b.title, 'author', b.author)) AS books
+            json_agg(json_build_object(
+              'id', b.id,
+              'title', b.title,
+              'author', b.author,
+              'cover_book', b.cover_book,
+              'cover_image', b.cover_book,
+              'copy_code', bc.copy_code
+            )) AS books
      FROM loans l
      JOIN loan_statuses ls ON l.status = ls.code
      JOIN users u ON l.user_id = u.id
      JOIN loan_items li ON l.id = li.loan_id
      JOIN books b ON li.book_id = b.id
+     LEFT JOIN book_copies bc ON li.book_copy_id = bc.id
      ${whereClause}
      GROUP BY l.id, ls.label, u.name, u.email, u.nim
      ORDER BY l.created_at DESC`,
@@ -254,7 +277,13 @@ exports.getAllLoansAdmin = async (req, res) => {
 
 exports.approveLoan = async (req, res) => {
   const { id } = req.valid.params;
-  const { duration_days, due_date, require_pickup, note } = req.valid.body;
+  const {
+    duration_days,
+    due_date,
+    require_pickup,
+    copy_codes = [],
+    note,
+  } = req.valid.body;
 
   const updatedLoan = await withTransaction(async (client) => {
     const { rows } = await client.query(
@@ -263,30 +292,68 @@ exports.approveLoan = async (req, res) => {
     );
     if (!rows.length) throw new HttpError(404, "Loan transaction not found");
     const loan = rows[0];
-    if (loan.status !== "pending")
+    if (loan.status !== "pending") {
       throw new HttpError(400, "Only pending loans can be approved");
+    }
 
     const settingRes = await client.query(
       `SELECT value FROM library_settings WHERE key = 'loan_duration_days'`,
     );
     const days = duration_days || parseInt(settingRes.rows[0]?.value || "7");
 
-    // Lock buku dan kurangi available_stock (PRD Business Rule #5)
-    const booksRes = await client.query(
-      `SELECT b.id, b.title, b.available_stock FROM loan_items li JOIN books b ON li.book_id = b.id
+    const itemsRes = await client.query(
+      `SELECT li.id AS loan_item_id, b.id AS book_id, b.title, b.available_stock
+       FROM loan_items li
+       JOIN books b ON li.book_id = b.id
        WHERE li.loan_id = $1 FOR UPDATE OF b`,
       [loan.id],
     );
-    for (const b of booksRes.rows) {
-      if (b.available_stock < 1) {
+
+    for (let i = 0; i < itemsRes.rows.length; i++) {
+      const item = itemsRes.rows[i];
+      if (item.available_stock < 1) {
         throw new HttpError(
           400,
-          `Cannot approve: "${b.title}" is out of stock`,
+          `Cannot approve: "${item.title}" is out of stock`,
         );
       }
+
+      const requestedCode = copy_codes[i];
+      const copyQuery = requestedCode
+        ? await client.query(
+            `SELECT id, copy_code FROM book_copies
+             WHERE book_id = $1 AND LOWER(copy_code) = LOWER($2) AND status = 'available'
+             FOR UPDATE`,
+            [item.book_id, requestedCode],
+          )
+        : await client.query(
+            `SELECT id, copy_code FROM book_copies
+             WHERE book_id = $1 AND status = 'available'
+             ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+            [item.book_id],
+          );
+
+      if (!copyQuery.rows.length) {
+        throw new HttpError(
+          400,
+          requestedCode
+            ? `Kode buku "${requestedCode}" tidak tersedia untuk "${item.title}"`
+            : `Tidak ada eksemplar berkode yang tersedia untuk "${item.title}"`,
+        );
+      }
+
+      const chosenCopy = copyQuery.rows[0];
       await client.query(
-        "UPDATE books SET available_stock = available_stock - 1 WHERE id = $1",
-        [b.id],
+        `UPDATE book_copies SET status = 'borrowed' WHERE id = $1`,
+        [chosenCopy.id],
+      );
+      await client.query(
+        `UPDATE loan_items SET book_copy_id = $1 WHERE id = $2`,
+        [chosenCopy.id, item.loan_item_id],
+      );
+      await client.query(
+        `UPDATE books SET available_stock = available_stock - 1 WHERE id = $1`,
+        [item.book_id],
       );
     }
 
@@ -307,6 +374,11 @@ exports.approveLoan = async (req, res) => {
       [nextStatus, req.user.id, dueParam, loan.id],
     );
 
+    const formattedDueDate =
+      updated[0].due_date instanceof Date
+        ? updated[0].due_date.toISOString().split("T")[0]
+        : String(updated[0].due_date).slice(0, 10);
+
     await client.query(
       `INSERT INTO loan_status_histories (loan_id, from_status, to_status, changed_by, note)
        VALUES ($1, 'pending', $2, $3, $4)`,
@@ -318,7 +390,7 @@ exports.approveLoan = async (req, res) => {
       [
         loan.user_id,
         loan.id,
-        `Pengajuan peminjaman #${loan.id} telah disetujui. Batas pengembalian: ${updated[0].due_date.toISOString().split("T")[0]}.`,
+        `Pengajuan peminjaman #${loan.id} telah disetujui. Batas pengembalian: ${formattedDueDate}.`,
       ],
     );
 
@@ -400,22 +472,33 @@ exports.confirmReturn = async (req, res) => {
     if (!rows.length) throw new HttpError(404, "Loan transaction not found");
 
     const loan = rows[0];
-    if (!["borrowed", "return_requested", "overdue"].includes(loan.status)) {
+    if (!["borrowed", "return_request", "overdue"].includes(loan.status)) {
       throw new HttpError(400, "Invalid loan status for return confirmation");
     }
 
-    // Kembalikan stok tersedia (PRD Business Rule #6)
     await client.query(
-      `UPDATE books b
-       SET available_stock = LEAST(b.total_stock, b.available_stock + 1)
+      `UPDATE loans
+       SET status = 'returned', returned_at = NOW(), received_by = $1
+       WHERE id = $2`,
+      [req.user.id, loan.id],
+    );
+
+    await client.query(
+      `UPDATE book_copies bc
+       SET status = 'available'
        FROM loan_items li
-       WHERE li.book_id = b.id AND li.loan_id = $1`,
+       WHERE li.book_copy_id = bc.id AND li.loan_id = $1`,
       [loan.id],
     );
 
     await client.query(
-      `UPDATE loans SET status = 'returned', returned_at = NOW(), received_by = $1 WHERE id = $2`,
-      [req.user.id, loan.id],
+      `UPDATE books b
+       SET available_stock = (
+         SELECT COUNT(*)::int FROM book_copies WHERE book_id = b.id AND status = 'available'
+       )
+       FROM loan_items li
+       WHERE li.book_id = b.id AND li.loan_id = $1`,
+      [loan.id],
     );
 
     await client.query(
