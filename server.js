@@ -26,6 +26,34 @@ app.get("/health", async (req, res) => {
   }
 });
 
+const allowedOrigin = process.env.FRONTEND_URL.split(",").map((origin) =>
+  origin.trim(),
+);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigin.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Origin ${origin} tidak diizinkan cors`));
+    },
+    credentials: true,
+  }),
+);
+
+app.use(express.json());
+
+app.use(express.urlencoded({ extended: true }));
+
+if (require.main === module) {
+  const PORT = process.env.PORT;
+  app.listen(PORT, () => {
+    console.log(`Server running at ${PORT}`);
+  });
+}
+
 app.use("/api/auth", authRoutes);
 app.use("/api", bookRoutes);
 app.use("/api/users", userRoutes);
